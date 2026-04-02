@@ -134,3 +134,6 @@ python-pptx==0.6.23
 numpy==1.26.4
 pandas==2.2.2
 ```
+
+## License
+This project is licensed under the MIT License. See the LICENSE file for details.
