@@ -1,0 +1,16 @@
+Python-3.11
+LLM / Orchestration
+langchain-core==0.3.5
+langchain-community==0.3.2
+langgraph==0.2.14
+ollama==0.2.1
+
+Vector Database 
+chromadb==0.5.5
+
+Document Parsing pymupdf==1.24.10
+python-docx==1.1.2
+python-pptx==0.6.23
+
+Utilities numpy==1.26.4
+pandas==2.2.2

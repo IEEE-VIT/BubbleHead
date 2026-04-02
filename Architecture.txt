@@ -1,0 +1,107 @@
+1.Pipeline Flow:
+User query->planner->similarity search->top k chunk selection->gap analysis->instruction prompt->LLM->Final answer for user
+
+After User sends query:
+->Query goes to retriever
+->Chromadb return top k chunks
+->token budget filter(5000 tokens)
+->gap analysis agent(confidence check + query refinement loop)
+->prompt construction
+->sent to LLM
+->Generation of answer by LLM
+->Output
+
+2.
+A.Ingestion: To extract text the parser processes raw documents (PDF,TXT,MD,HTML). The content is divided into relevant chunks by the chunker and then transformed into dense vectors by the embedder. A vector database, Chromadb stores the vectors.
+1.Types of Documents Supported
+PDF: PyMuPDF/pdfplumber- OCR for PDF scans
+Python-docx: DOCX-: maintains the hierarchy of headings
+Python-pptx: PPT/PPT- per-slide chunking with speaker notes
+TXT: Direct chunking in Native Python
+HTML: BeautifulSoup4- maintains semantic structure while removing tags
+CSV: Pandas- preserves the row/column context
+
+2.Chunking Strategy:
+Chunking Strategy: Hybrid(Semantic + Recursive)
+
+To avoid mid-sentence cuts, breaks between paragraphs, sentences, and words as a baseline. For long-form documents,consecutive sentences are grouped together if they have the same embeddings. 512 tokens with a 50-token overlap to keep the context. Source file, page, chunk index, section heading, and document type are considered as metadata.
+In certain situations: Code blocks with a type: code tag remain intact, tables will be kept unsplit, and PowerPoint slides are chunked per slide.
+
+3.Embedding:
+Each chunk converted into vector
+Ollama gives dense vectors
+
+4.Storage(Chromadb):
+Stores:
+Embeddings
+Text chunks
+
+
+3.Retrieval:To find the most relevant passages, the retriever takes the user's raw query and converts it into a dense vector. This query is compared with every stored chunk vector in Chromadb using cosine similarity, and the top 10 nearest candidates are returned as a dense retrieval pool.
+
+The top 10 candidates are passed through BM25- ranking algorithm, which re-scores them on the basis of exact term overlap with the query. This approach takes hold of specific names, dates, technical terms and acronyms that may not be semantically similar but are lexically exact. The top 6 final chunks are selected from the re-ranked list.
+
+A token budget of 5000 tokens is taken here. Chunks are added one by one on the basis of their ranking and the running token count is tracked. As soon as adding the next chunk would exceed 5000 tokens, selection stops. This ensures that the LLM never receives a context that is too large to handle for the LLM, regardless of chunk size variation.
+
+4.Gap Analysis Agent:
+The gap analysis agent is positioned between retrieval and generation. Before the retrieved chunks are passed to the generator, it assesses whether they are sufficient to address the user's query. After reading the retrieved chunks and the original query, the agent produces a confidence score between 0 and 1, which indicates how thoroughly the context answers the query. The pipeline proceeds straight to the generator agent with no additional retrieval if the score reaches or surpasses 0.72. The agent then issues a PASS. In the event that the score is less than 0.72, the agent issues a FAIL, pinpoints the precise information that is lacking, and crafts a more focused and targeted follow-up query. New chunks are added to that query, which is then retrieved again.
+This loop is repeated up to four times. The agent scores the entire accumulated context from all passes combined, not just the most recent portions, on each iteration. Iteration ends and generation starts if the confidence crosses 0.72 at any point. The system requires a "FORCE PASS" status if the agent reaches iteration 4 and the score is still less than 0.72. After that, it is still sent to LLM in some way, and it is notified of the missing information.
+
+For checking if the context is enough or not
+A confidence score is given
+Reads the user's question and retrieved chunk
+If score >= 0.72 PASS->goes to LLM
+If score < 0.72
+Fail->query is refined->retrieved again
+
+Iteration rules:
+Max iteration: 4
+If even after 4 passes it isn't enough FORCE PASS->goes to LLM still
+Generator gets information about the missing information.
+
+Gap Analysis Agent Prompt:
+You are a gap analysis agent sitting between the retrieval step and the language model in a retrieval augmented generation pipeline. Your job is to decide whether the chunks retrieved from the vector database are good enough to answer the user's question before anything is sent to the generator. Read the user's question and all retrieved passages carefully. Then classify the context as one of the following: sufficient, if the passages together answer the question completely and nothing important is missing; partial, if some parts of the question are covered but key information is absent; or insufficient, if the passages do not meaningfully address the question at all. If you classify the context as partial or insufficient, identify exactly what information is missing and rewrite the query in a more targeted way so that a follow-up retrieval has a better chance of filling the gap. Do not pass anything to the generator until the context is sufficient or the maximum number of retries has been reached.
+
+5.Generation:To give an answer, the LLM agent receives two things — the question asked by the user and the retrieved chunks are formatted as numbered passages. These are assembled into a single prompt using the researcher system prompt, which asks the model to answer strictly from the provided passages, citing which passage supports each claim.
+This prompt goes to Ollama mistral:7b which is running it locally. The model runs at a temperature of 0.3, which keeps answers factual and direct without being too strict with the citations.The model generates a response, which is passed back through the LangGraph state and returned to the user as the final answer. The output produced by the LLM is displayed on the users' screen
+
+Prompt Construction:
+Final Input to the LLM:
+Generator agent prompt
+Retrieved chunks
+User question
+
+Generator agent prompt:
+You are a research analyst who answers on the basis of documents provided. Generate a clear, complete and correct answer to the users' question and as per users' requirement. Only use the information present in the documents to answer the question. No use of prior knowledge or making of assumptions beyond the information provided.Give the answer in a structured manner. Maintain factual accuracy. If multiple pieces of information are correct combine them logically.
+
+Model Selection
+
+LLM (Generation)		mistral:7b(Ollama)
+Runtime			        Ollama
+Vector Store			ChromaDB
+Temperature-			0.3
+Top K 				    6
+Token Budget			5000
+
+Output:
+Answer is generated
+Returned via Langgraph
+Output displayed to user
+
+Dependencies:
+Python-3.11
+LLM / Orchestration
+langchain-core==0.3.5
+langchain-community==0.3.2
+langgraph==0.2.14
+ollama==0.2.1
+
+Vector Database 
+chromadb==0.5.5
+
+Document Parsing pymupdf==1.24.10
+python-docx==1.1.2
+python-pptx==0.6.23
+
+Utilities numpy==1.26.4
+pandas==2.2.2
