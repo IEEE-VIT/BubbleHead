@@ -1,12 +1,10 @@
 from __future__ import annotations
-
 import re
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple
 
-import tiktoken
 
 # ---------------------------------------------------------------------------
 # Pull constants from project config; fall back to safe defaults if needed
@@ -30,7 +28,16 @@ logger = logging.getLogger(__name__)
 # Tiktoken encoder (cl100k_base covers GPT-4 / text-embedding-3 tokenization;
 # a close enough proxy for BPE counts on code-heavy documents)
 # ---------------------------------------------------------------------------
-_ENCODER = tiktoken.get_encoding("cl100k_base")
+_ENCODER = None
+
+
+def _get_encoder():
+    """Lazy-load the tiktoken encoder on first use."""
+    global _ENCODER
+    if _ENCODER is None:
+        import tiktoken
+        _ENCODER = tiktoken.get_encoding("cl100k_base")
+    return _ENCODER
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +46,7 @@ _ENCODER = tiktoken.get_encoding("cl100k_base")
 
 def _token_count(text: str) -> int:
     """Return the number of BPE tokens in *text* using tiktoken (cl100k_base)."""
-    return len(_ENCODER.encode(text))
+    return len(_get_encoder().encode(text))
 
 
 # ---------------------------------------------------------------------------
@@ -197,23 +204,36 @@ def _chunk_plain_text(text: str, pending_overlap: str = "") -> List[Chunk]:
             if sent_tokens > MAX_TOKENS:
                 if current_sentences:
                     current_sentences, current_tokens = _flush(current_sentences)
-
+                
                 words = sent.split()
                 word_buf: List[str] = []
-                word_count = 0
+                word_buf_tokens = 0
+
                 for word in words:
-                    if word_count + 1 > MAX_TOKENS:
+                    # Calculate tokens for buffer with this word added
+                    test_text = " ".join(word_buf + [word])
+                    test_tokens = _token_count(test_text)
+                    
+                    if test_tokens > MAX_TOKENS and word_buf:
+                        # Flush current buffer
                         chunk_text = " ".join(word_buf)
                         chunks.append(Chunk(text=chunk_text, type="text"))
-                        logger.debug(
-                            "Hard word-split chunk (%d tokens)", _token_count(chunk_text)
-                        )
-                        overlap_words = word_buf[-OVERLAP_TOKENS:]
+                        logger.debug("Hard word-split chunk (%d tokens)", word_buf_tokens)
+                        
+                        # Keep last OVERLAP_TOKENS worth of words as overlap
+                        overlap_words = []
+                        for w in reversed(word_buf):
+                            test_overlap = " ".join([w] + overlap_words)
+                            if _token_count(test_overlap) > OVERLAP_TOKENS:
+                                break
+                            overlap_words.insert(0, w)
+
                         word_buf = overlap_words + [word]
-                        word_count = len(word_buf)
+                        word_buf_tokens = _token_count(" ".join(word_buf))
                     else:
                         word_buf.append(word)
-                        word_count += 1
+                        word_buf_tokens = test_tokens
+                
                 if word_buf:
                     residual = " ".join(word_buf)
                     current_sentences = [residual]
@@ -268,17 +288,23 @@ def _chunk_table(table_text: str) -> List[Chunk]:
 
     for row in data_lines:
         row_tokens = _token_count(row)
+        
+        # Account for newline token when adding row
+        test_text = "\n".join(current_rows + [row])
+        test_tokens = _token_count(test_text)
 
-        if current_tokens + row_tokens > MAX_TOKENS:
+        if test_tokens > MAX_TOKENS and len(current_rows) > len(header_lines):
+            # Flush current chunk
             chunk_text = "\n".join(current_rows).strip()
             if chunk_text:
                 chunks.append(Chunk(text=chunk_text, type="table"))
-                logger.debug("Flushed table chunk (%d tokens)", _token_count(chunk_text))
+                logger.debug("Flushed table chunk (%d tokens)", current_tokens)
+            # Start new chunk with header + current row
             current_rows = list(header_lines) + [row]
-            current_tokens = header_tokens + row_tokens
+            current_tokens = _token_count("\n".join(current_rows))
         else:
             current_rows.append(row)
-            current_tokens += row_tokens
+            current_tokens = test_tokens
 
     if current_rows:
         chunk_text = "\n".join(current_rows).strip()
@@ -313,17 +339,28 @@ def _chunk_code(code_text: str) -> List[Chunk]:
 
     for line in lines:
         line_tokens = _token_count(line)
-        if current_tokens + line_tokens > MAX_TOKENS and current_lines:
+        
+        # Test if adding this line would exceed limit
+        test_lines = current_lines + [line]
+        test_text = "\n".join(test_lines)
+        test_tokens = _token_count(test_text)
+        
+        if test_tokens > MAX_TOKENS and current_lines:
+            # Flush current block
             block = "\n".join(current_lines)
             if in_fence and not block.rstrip().endswith("```"):
                 block += "\n```"
             chunks.append(Chunk(text=block.strip(), type="code"))
+            # Start new block with fence marker
             current_lines = ["```"]
-            current_tokens = 1
+            current_tokens = _token_count("```")
             in_fence = True
+            # Recalculate with new line
+            test_lines = current_lines + [line]
+            test_tokens = _token_count("\n".join(test_lines))
 
         current_lines.append(line)
-        current_tokens += line_tokens
+        current_tokens = test_tokens
 
         if line.strip().startswith("```"):
             in_fence = not in_fence
@@ -409,12 +446,31 @@ def chunk_document(text: str) -> List[dict]:
             )
             words = chunk.text.split()
             buf: List[str] = []
+            buf_tokens = 0
+            
             for word in words:
-                if _token_count(" ".join(buf) + " " + word) > MAX_TOKENS:
+                # Calculate tokens for buffer with this word added
+                test_text = " ".join(buf + [word])
+                test_tokens = _token_count(test_text)
+                
+                if test_tokens > MAX_TOKENS and buf:
+                    # Flush current buffer
                     safe_chunks.append(Chunk(text=" ".join(buf), type=chunk.type))
-                    buf = buf[-OVERLAP_TOKENS:] + [word]
+                    
+                    # Keep last OVERLAP_TOKENS worth of words as overlap
+                    overlap_words = []
+                    for w in reversed(buf):
+                        test_overlap = " ".join([w] + overlap_words)
+                        if _token_count(test_overlap) > OVERLAP_TOKENS:
+                            break
+                        overlap_words.insert(0, w)
+
+                    buf = overlap_words + [word]
+                    buf_tokens = _token_count(" ".join(buf))
                 else:
                     buf.append(word)
+                    buf_tokens = test_tokens
+                    
             if buf:
                 safe_chunks.append(Chunk(text=" ".join(buf), type=chunk.type))
         else:
