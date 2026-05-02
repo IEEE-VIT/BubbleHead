@@ -1,37 +1,43 @@
 @echo off
-REM BubbleHead RAG UI Startup Script for Windows
+REM BubbleHead Research Analysis Interface — Windows Startup Script
 
-echo 🫧 Starting BubbleHead RAG Testing UI...
+echo.
+echo  BubbleHead Research Analysis Interface
+echo  =======================================
 echo.
 
-REM Check if Ollama is running
+REM ── Check Ollama ──────────────────────────────────────────────────────────
+echo  Checking Ollama service...
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if errorlevel 1 (
-    echo ⚠️  Warning: Ollama doesn't appear to be running
-    echo    Please start Ollama in another terminal: ollama serve
+    echo  [WARN]  Ollama is not running.
+    echo          Start it in a separate terminal: ollama serve
     echo.
+) else (
+    echo  [OK]    Ollama is running.
 )
 
-echo 📦 Checking required models...
-ollama list | findstr "nomic-embed-text" >nul
+REM ── Check embedding model ─────────────────────────────────────────────────
+echo  Checking required models...
+ollama list 2>nul | findstr "nomic-embed-text" >nul
 if errorlevel 1 (
-    echo    ⚠️  nomic-embed-text not found
-    echo    Run: ollama pull nomic-embed-text
+    echo  [WARN]  nomic-embed-text not found. Run: ollama pull nomic-embed-text
 ) else (
-    echo    ✅ nomic-embed-text found
+    echo  [OK]    nomic-embed-text found.
 )
 
-ollama list | findstr "mistral:7b" >nul
+REM ── Check LLM ─────────────────────────────────────────────────────────────
+ollama list 2>nul | findstr "mistral:latest" >nul
 if errorlevel 1 (
-    echo    ⚠️  mistral:7b not found
-    echo    Run: ollama pull mistral:7b
+    echo  [WARN]  mistral:latest not found. Run: ollama pull mistral:latest
 ) else (
-    echo    ✅ mistral:7b found
+    echo  [OK]    mistral:latest found.
 )
 
 echo.
-echo 🚀 Launching UI on http://localhost:7860
+echo  Starting server on http://localhost:7860
+echo  Press Ctrl+C to stop.
 echo.
 
-REM Launch the UI
+REM ── Launch FastAPI backend ────────────────────────────────────────────────
 python ui.py

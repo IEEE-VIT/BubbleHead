@@ -1,222 +1,184 @@
 # BubbleHead RAG Pipeline
 
-A production-ready Retrieval-Augmented Generation (RAG) pipeline with iterative gap analysis, BM25 reranking, and a Gradio UI for testing.
+BubbleHead is a local retrieval-augmented generation (RAG) application built on Ollama, ChromaDB, BM25 reranking, and an iterative gap-analysis loop. The current repo ships a FastAPI backend, a static HTML/JavaScript frontend, and a CLI for batch ingestion and ad hoc queries.
 
-## Features
+## Highlights
 
-- **Advanced Retrieval**: ChromaDB vector store with BM25 reranking
-- **Gap Analysis**: Iterative quality evaluation with confidence scoring
-- **Token Budget Management**: Automatic token counting and budget enforcement
-- **Multiple Document Formats**: PDF, DOCX, PPTX, TXT, HTML, CSV support
-- **LangGraph Pipeline**: State-based orchestration with conditional routing
-- **Interactive UI**: Gradio interface for document ingestion and querying
-- **GPU Support**: Automatic GPU acceleration via Ollama
+- Hybrid retrieval with ChromaDB vector search and BM25 reranking
+- Gap analysis loop that retries low-confidence queries with refined wording
+- Token-budget-aware chunking and retrieval safeguards
+- Multi-format ingestion for PDF, DOCX, PPTX, TXT, HTML, and CSV files
+- Local-first runtime with Ollama models and on-disk Chroma persistence
+- Browser UI plus CLI entry points for ingestion and querying
 
 ## Architecture
 
+```text
+retrieve_node -> generate_node -> gap_analysis_node
+                                      |
+                                   PASS -> end
+                                   RETRY -> retrieve_node
 ```
-retrieve_node → generate_node → gap_analysis_node
-                                      ↓
-                                   [PASS] → END
-                                   [RETRY] → retrieve_node (loop)
-```
 
-## Prerequisites
+## Requirements
 
-- Python 3.11+
-- [Ollama](https://ollama.ai/) installed and running
-- NVIDIA GPU (optional, for acceleration)
+- Python 3.11 or 3.12
+- [Ollama](https://ollama.com/) installed locally
+- A pulled embedding model: `nomic-embed-text`
+- A pulled generation model: `mistral:latest`
 
-## Installation
+## Quick Start
 
-1. **Clone the repository**
+1. Clone the repository and move into it.
    ```bash
    git clone <your-repo-url>
-   cd RAG
+   cd BubbleHead
    ```
-
-2. **Create virtual environment**
+2. Create and activate a virtual environment.
    ```bash
-   python -m venv venv
-   
-   # Windows
-   venv\Scripts\activate
-   
-   # Linux/Mac
-   source venv/bin/activate
+   python -m venv .venv
    ```
-
-3. **Install dependencies**
+   Windows:
+   ```bash
+   .venv\Scripts\activate
+   ```
+   macOS/Linux:
+   ```bash
+   source .venv/bin/activate
+   ```
+3. Install Python dependencies.
    ```bash
    pip install -r requirements.txt
    ```
-
-4. **Pull required Ollama models**
+4. Start Ollama and pull the models used by `config.py`.
+   ```bash
+   ollama serve
+   ```
+   In another terminal:
    ```bash
    ollama pull nomic-embed-text
-   ollama pull kimi-k2.5:cloud
+   ollama pull mistral:latest
    ```
 
-## Configuration
+## Running The App
 
-Edit `config.py` to customize:
+### Web UI
 
-```python
-# Models
-EMBED_MODEL = 'nomic-embed-text'
-LLM_MODEL = 'kimi-k2.5:cloud'
-
-# Retrieval
-TOP_K_CANDIDATES = 10
-TOP_K_FINAL = 6
-TOKEN_BUDGET = 5000
-
-# Gap Analysis
-GAP_CONFIDENCE_THRESHOLD = 0.6
-GAP_MAX_ITERATIONS = 2
-```
-
-## Usage
-
-### Option 1: Gradio UI (Recommended)
+Start the FastAPI server with either helper script or directly:
 
 ```bash
 # Windows
 start_ui.bat
 
-# Linux/Mac
+# macOS / Linux
 ./start_ui.sh
+
+# direct
+python ui.py
 ```
 
-Then open http://localhost:7860 in your browser.
+Open `http://localhost:7860` after the server reports that the pipeline is ready.
 
-**UI Features:**
-- **Ingest Tab**: Upload and process documents
-- **Query Tab**: Ask questions and get answers
-- **Collection Info Tab**: View database statistics
+### CLI
 
-### Option 2: Command Line
-
-**Ingest documents:**
-```bash
-python main.py ingest <directory_path>
-```
-
-**Query:**
-```bash
-python main.py query "What is the main topic?"
-```
-
-## Project Structure
-
-```
-RAG/
-├── config.py                 # Configuration constants
-├── main.py                   # CLI entry point
-├── ui.py                     # Gradio interface
-├── requirements.txt          # Python dependencies
-├── ingestion/
-│   ├── Chunker.py           # Document chunking
-│   ├── Embedder.py          # Embedding & storage
-│   └── parsers/
-│       └── Parser.py        # Multi-format parsing
-├── retrieval/
-│   ├── Retriever.py         # BM25 + vector retrieval
-│   └── gap_analysis_agent.py # Quality evaluation
-├── pipeline/
-│   ├── generator.py         # Answer generation
-│   └── pipeline.py          # LangGraph orchestration
-└── data/
-    └── chroma/              # Vector database (gitignored)
-```
-
-## How It Works
-
-### 1. Document Ingestion
-- Parse documents (PDF, DOCX, PPTX, etc.)
-- Chunk text (512 tokens, 50 overlap)
-- Generate embeddings with `nomic-embed-text`
-- Store in ChromaDB
-
-### 2. Retrieval
-- Embed query with `search_query:` prefix
-- Retrieve top 10 candidates from ChromaDB
-- Rerank with BM25
-- Select top 6 within token budget (5000 tokens)
-
-### 3. Generation
-- Format chunks as numbered passages
-- Generate answer with `kimi-k2.5:cloud`
-- Use system prompt for structured responses
-
-### 4. Gap Analysis
-- Evaluate answer quality
-- Confidence scoring (0.0-1.0)
-- If confidence < 0.6: retry with refined query
-- Max 2 iterations
-
-## GPU Acceleration
-
-Ollama automatically uses your GPU if available. To verify:
+Ingest every supported document under a directory:
 
 ```bash
-ollama ps
+python main.py ingest ./data
 ```
 
-Look for "GPU" in the PROCESSOR column.
+Run a query against the stored collection:
 
-## Development
-
-### Running Tests
 ```bash
-pytest tests/
+python main.py query "What are the main findings?"
 ```
 
-### Code Style
-```bash
-black .
-flake8 .
+## API Surface
+
+The FastAPI app in `ui.py` exposes:
+
+- `GET /api/status` for warm-up state
+- `POST /api/ingest` for single-file ingestion
+- `POST /api/query` for question answering
+- `GET /api/collection` for collection stats
+
+## Configuration
+
+Project defaults live in `config.py`.
+
+```python
+OLLAMA_BASE_URL = "http://localhost:11434"
+EMBED_MODEL = "nomic-embed-text"
+LLM_MODEL = "mistral:latest"
+
+CHUNK_SIZE = 512
+CHUNK_OVERLAP = 50
+TOP_K_CANDIDATES = 10
+TOP_K_FINAL = 6
+TOKEN_BUDGET = 5000
+
+GAP_CONFIDENCE_THRESHOLD = 0.6
+GAP_MAX_ITERATIONS = 2
 ```
+
+## Project Layout
+
+```text
+BubbleHead/
+|-- config.py
+|-- main.py
+|-- ui.py
+|-- frontend/
+|   `-- index.html
+|-- ingestion/
+|   |-- Chunker.py
+|   |-- Embedder.py
+|   `-- parsers/Parser.py
+|-- retrieval/
+|   |-- Retriever.py
+|   `-- gap_analysis_agent.py
+|-- pipeline/
+|   |-- generator.py
+|   `-- pipeline.py
+`-- data/
+    `-- chroma/
+```
+
+## Retrieval Flow
+
+1. Documents are parsed into sections, chunked, validated, embedded, and stored in ChromaDB.
+2. Queries are embedded with the `search_query:` prefix and matched against stored vectors.
+3. The retriever reranks candidates with BM25 and trims the final context to the configured token budget.
+4. The generator produces an answer, and the gap-analysis step decides whether retrieval should retry.
 
 ## Troubleshooting
 
-**Issue: "No module named 'gradio'"**
-- Solution: Activate venv and run `pip install -r requirements.txt`
+**Ollama connection errors**
 
-**Issue: Ollama connection error**
-- Solution: Ensure Ollama is running: `ollama serve`
+Make sure `ollama serve` is running and the configured models are pulled locally.
 
-**Issue: GPU not detected**
-- Solution: Restart Ollama service or reinstall with GPU support
+**Pipeline warming up**
 
-**Issue: ChromaDB errors**
-- Solution: Delete `data/chroma/` and re-ingest documents
+The UI loads before heavy pipeline imports finish. Retry once `GET /api/status` reports `"ready": true`.
 
-## Performance Tips
+**Missing parser dependencies**
 
-1. **Adjust chunk size** for your documents (config.py)
-2. **Tune gap analysis threshold** (lower = more retries)
-3. **Increase token budget** for longer contexts
-4. **Use GPU** for 5-10x faster inference
+Reinstall with `pip install -r requirements.txt`. PDF fallback parsing requires `pdfplumber`.
+
+**Collection issues**
+
+Delete `data/chroma/` and re-ingest if the local collection becomes inconsistent.
+
+## Development
+
+Suggested local checks:
+
+```bash
+black --check .
+flake8 .
+python -m compileall .
+```
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Acknowledgments
-
-- Built with [LangGraph](https://github.com/langchain-ai/langgraph)
-- Powered by [Ollama](https://ollama.ai/)
-- Vector store: [ChromaDB](https://www.trychroma.com/)
-- UI: [Gradio](https://gradio.app/)
-
-## Contact
-
-For issues and questions, please open a GitHub issue.
+MIT. See `LICENSE`.
