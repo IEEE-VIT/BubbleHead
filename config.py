@@ -52,7 +52,7 @@ CHROMA_COLLECTION = 'bubblehead'
 # ── OLLAMA CONFIGURATION ──────────────────────────────────────────────────
 OLLAMA_BASE_URL = 'http://localhost:11434'
 EMBED_MODEL = 'nomic-embed-text'
-LLM_MODEL = 'kimi-k2.5:cloud'
+LLM_MODEL = 'mistral:latest'
 LLM_TEMPERATURE = 0.3
 
 # ── CHUNKING PARAMETERS ───────────────────────────────────────────────────

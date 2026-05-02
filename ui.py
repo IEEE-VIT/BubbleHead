@@ -1,21 +1,65 @@
 """
-ui.py - BubbleHead RAG Testing UI
+ui.py - BubbleHead Research Analysis Interface
 
-Simple Gradio interface for testing the RAG pipeline.
+FastAPI backend that serves the vanilla HTML/CSS/JS frontend
+and exposes REST API endpoints for the RAG pipeline.
 """
 
 import logging
-import gradio as gr
+import os
+import tempfile
+import threading
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
 
-from ingestion.parsers.Parser import parse as parse_file
-from ingestion.Chunker import chunk_document
-from ingestion.Embedder import embed_and_store, collection_stats
-from pipeline.pipeline import run
+import uvicorn
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+# ── Lazy pipeline loader ───────────────────────────────────────────────────────
+# Heavy imports (chromadb, pymupdf, langchain, ollama) are deferred to a
+# background thread so the server starts and serves the frontend immediately.
+
+_ready   = False   # True once all pipeline modules are loaded
+_load_err: str | None = None
+
+_parse_file     = None
+_chunk_document = None
+_embed_and_store = None
+_collection_stats = None
+_run            = None
 
 
-# Set up logging
+def _load_pipeline():
+    global _ready, _load_err
+    global _parse_file, _chunk_document, _embed_and_store, _collection_stats, _run
+    try:
+        logger.info("Loading pipeline modules in background…")
+        from ingestion.parsers.Parser import parse as _pf
+        from ingestion.Chunker import chunk_document as _cd
+        from ingestion.Embedder import embed_and_store as _es, collection_stats as _cs
+        from pipeline.pipeline import run as _r
+        _parse_file      = _pf
+        _chunk_document  = _cd
+        _embed_and_store = _es
+        _collection_stats = _cs
+        _run             = _r
+        _ready = True
+        logger.info("Pipeline ready.")
+    except Exception as exc:
+        _load_err = str(exc)
+        logger.error("Pipeline failed to load: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    threading.Thread(target=_load_pipeline, daemon=True).start()
+    yield
+
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -23,256 +67,177 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def ingest_file(file) -> str:
-    """
-    Ingest a single uploaded file.
-    
-    Args:
-        file: Gradio file upload object
-        
-    Returns:
-        Status message string
-    """
-    if file is None:
-        return "❌ No file uploaded"
-    
+# ── App ────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="BubbleHead Research Analysis API",
+    description="RAG pipeline API: ingest documents, run queries, inspect collection.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+_WARMING_UP = JSONResponse(
+    {"success": False, "message": "Pipeline is warming up, please try again in a few seconds."},
+    status_code=503,
+)
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return FileResponse("frontend/index.html")
+
+
+@app.get("/api/status")
+async def status():
+    """Returns whether the pipeline has finished loading."""
+    return JSONResponse({"ready": _ready, "error": _load_err})
+
+
+@app.post("/api/ingest")
+async def ingest(file: UploadFile = File(...)):
+    if not _ready:
+        return _WARMING_UP
+
+    if not file or not file.filename:
+        return JSONResponse({"success": False, "message": "No file provided."})
+
+    suffix  = Path(file.filename).suffix.lower()
+    allowed = {".pdf", ".docx", ".pptx", ".txt", ".html", ".csv"}
+
+    if suffix not in allowed:
+        return JSONResponse({
+            "success": False,
+            "message": f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(allowed))}",
+        })
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
-        file_path = file.name
-        file_name = Path(file_path).name
-        
-        logger.info("Processing uploaded file: %s", file_name)
-        
-        # Parse file - returns list of dicts with 'text' key
-        parsed_sections = parse_file(file_path)
-        
+        content = await file.read()
+        with os.fdopen(tmp_fd, "wb") as fh:
+            fh.write(content)
+
+        file_name = file.filename
+        logger.info("Ingesting: %s", file_name)
+
+        parsed_sections = _parse_file(tmp_path)
         if not parsed_sections:
-            return f"❌ No content extracted from {file_name}"
-        
-        # Combine all text sections
-        combined_text = "\n\n".join([section['text'] for section in parsed_sections if section.get('text')])
-        
+            return JSONResponse({
+                "success": False,
+                "message": f"No content could be extracted from '{file_name}'.",
+            })
+
+        combined_text = "\n\n".join(s["text"] for s in parsed_sections if s.get("text"))
         if not combined_text.strip():
-            return f"❌ No text extracted from {file_name}"
-        
-        # Chunk document
-        chunks = chunk_document(combined_text)
-        
+            return JSONResponse({"success": False, "message": f"No readable text in '{file_name}'."})
+
+        chunks = _chunk_document(combined_text)
         if not chunks:
-            return f"❌ No chunks created from {file_name}"
-        
-        # Add metadata to chunks
-        for chunk in chunks:
-            if 'metadata' not in chunk:
-                chunk['metadata'] = {}
-            chunk['metadata']['source_file'] = file_name
-            chunk['metadata']['chunk_index'] = chunks.index(chunk)
-            chunk['metadata']['page_number'] = 0
-            chunk['metadata']['section_heading'] = ''
-            chunk['metadata']['document_type'] = Path(file_name).suffix[1:]
-        
-        # Convert to proper chunk objects for embedder
-        from dataclasses import dataclass
-        
+            return JSONResponse({"success": False, "message": f"Chunking produced no output for '{file_name}'."})
+
+        for i, chunk in enumerate(chunks):
+            chunk.setdefault("metadata", {})
+            chunk["metadata"].update({
+                "source_file":     file_name,
+                "chunk_index":     i,
+                "page_number":     0,
+                "section_heading": "",
+                "document_type":   suffix.lstrip("."),
+            })
+
         @dataclass
         class ChunkObj:
             text: str
             metadata: dict
-        
-        chunk_objects = [ChunkObj(text=c['text'], metadata=c.get('metadata', {})) for c in chunks]
-        
-        # Embed and store
-        stats = embed_and_store(chunk_objects)
-        
-        stored = stats.get('stored', 0)
-        rejected = stats.get('rejected', 0)
-        
-        return f"""✅ Successfully ingested {file_name}
-        
-📊 Statistics:
-- Chunks stored: {stored}
-- Chunks rejected: {rejected}
-- Average tokens: {stats.get('avg_tokens', 0):.0f}
-- Max tokens: {stats.get('max_tokens', 0)}
-- Collection total: {stats.get('collection_total', 0)}
-"""
-        
-    except Exception as e:
-        logger.error("Ingestion failed: %s", e)
-        return f"❌ Error: {str(e)}"
+
+        chunk_objects = [ChunkObj(text=c["text"], metadata=c.get("metadata", {})) for c in chunks]
+        stats = _embed_and_store(chunk_objects)
+
+        logger.info("Ingested '%s': stored=%d, rejected=%d",
+                    file_name, stats.get("stored", 0), stats.get("rejected", 0))
+
+        return JSONResponse({
+            "success":          True,
+            "file_name":        file_name,
+            "stored":           stats.get("stored", 0),
+            "rejected":         stats.get("rejected", 0),
+            "avg_tokens":       round(stats.get("avg_tokens", 0)),
+            "max_tokens":       stats.get("max_tokens", 0),
+            "collection_total": stats.get("collection_total", 0),
+        })
+
+    except Exception as exc:
+        logger.exception("Ingestion failed for '%s'", file.filename)
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=500)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
-def query_rag(question: str) -> Tuple[str, str]:
-    """
-    Query the RAG pipeline.
-    
-    Args:
-        question: User's question
-        
-    Returns:
-        Tuple of (answer, status_info)
-    """
-    if not question or not question.strip():
-        return "❌ Please enter a question", ""
-    
+class QueryRequest(BaseModel):
+    question: str
+
+
+@app.post("/api/query")
+async def query(req: QueryRequest):
+    if not _ready:
+        return _WARMING_UP
+
+    question = (req.question or "").strip()
+    if not question:
+        return JSONResponse({"success": False, "message": "Question cannot be empty."})
+
     try:
-        logger.info("Processing query: %s", question)
-        
-        # Run RAG pipeline
-        answer = run(question)
-        
-        # Get collection stats
-        stats = collection_stats()
-        status_info = f"""📊 Collection Stats:
-- Total chunks: {stats.get('count', 0)}
-- Status: {'✅ Ready' if stats.get('count', 0) > 0 else '⚠️ Empty'}
-"""
-        
-        return answer, status_info
-        
-    except Exception as e:
-        logger.error("Query failed: %s", e)
-        return f"❌ Error: {str(e)}", ""
+        logger.info("Running query: %s", question)
+        answer = _run(question)
+        stats  = _collection_stats()
+        count  = stats.get("count", 0)
+
+        return JSONResponse({
+            "success":            True,
+            "answer":             answer,
+            "collection_count":   count,
+            "retrieval_strategy": "Hybrid (Vector + BM25)",
+            "gap_analysis":       "Active",
+            "collection_status":  "Ready" if count > 0 else "Empty — ingest documents first",
+        })
+
+    except Exception as exc:
+        logger.exception("Query failed")
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=500)
 
 
-def get_collection_info() -> str:
-    """Get current collection statistics."""
+@app.get("/api/collection")
+async def get_collection():
+    if not _ready:
+        return JSONResponse({"success": True, "name": "—", "count": 0,
+                             "status": "Pipeline warming up…"})
     try:
-        stats = collection_stats()
-        
-        if 'error' in stats:
-            return f"⚠️ {stats['error']}"
-        
-        return f"""📊 Collection Statistics:
-        
-- Name: {stats.get('name', 'N/A')}
-- Total chunks: {stats.get('count', 0)}
-- Status: {'✅ Ready for queries' if stats.get('count', 0) > 0 else '⚠️ Empty - ingest documents first'}
-"""
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
+        stats = _collection_stats()
+        if "error" in stats:
+            return JSONResponse({"success": False, "message": stats["error"]})
+        count = stats.get("count", 0)
+        return JSONResponse({
+            "success": True,
+            "name":    stats.get("name", "N/A"),
+            "count":   count,
+            "status":  "Ready for queries" if count > 0 else "Empty — ingest documents first",
+        })
+    except Exception as exc:
+        logger.exception("Collection info failed")
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=500)
 
 
-# Build Gradio interface
-demo = gr.Blocks(title="BubbleHead RAG Testing UI")
-
-with demo:
-    gr.Markdown("""
-    # 🫧 BubbleHead RAG Testing UI
-    
-    Test the BubbleHead RAG pipeline with document ingestion and querying.
-    """)
-    
-    with gr.Tabs():
-        # Tab 1: Ingestion
-        with gr.Tab("📥 Ingest Documents"):
-            gr.Markdown("""
-            ### Upload and ingest documents
-            Supported formats: PDF, DOCX, PPTX, TXT, HTML, CSV
-            """)
-            
-            with gr.Row():
-                with gr.Column():
-                    file_input = gr.File(
-                        label="Upload Document",
-                        file_types=[".pdf", ".docx", ".pptx", ".txt", ".html", ".csv"]
-                    )
-                    ingest_btn = gr.Button("🚀 Ingest Document", variant="primary")
-                
-                with gr.Column():
-                    ingest_output = gr.Textbox(
-                        label="Ingestion Status",
-                        lines=10,
-                        interactive=False
-                    )
-            
-            ingest_btn.click(
-                fn=ingest_file,
-                inputs=[file_input],
-                outputs=[ingest_output]
-            )
-        
-        # Tab 2: Query
-        with gr.Tab("🔍 Query RAG"):
-            gr.Markdown("""
-            ### Ask questions about your documents
-            The RAG pipeline will retrieve relevant chunks and generate an answer.
-            """)
-            
-            with gr.Row():
-                with gr.Column():
-                    question_input = gr.Textbox(
-                        label="Your Question",
-                        placeholder="What is BubbleHead?",
-                        lines=3
-                    )
-                    query_btn = gr.Button("🔍 Ask Question", variant="primary")
-                    
-                    gr.Markdown("### Examples")
-                    gr.Examples(
-                        examples=[
-                            ["What is the main topic of the document?"],
-                            ["Summarize the key points"],
-                            ["What are the technical requirements?"],
-                        ],
-                        inputs=[question_input]
-                    )
-            
-            with gr.Row():
-                with gr.Column():
-                    answer_output = gr.Textbox(
-                        label="Answer",
-                        lines=15,
-                        interactive=False
-                    )
-                
-                with gr.Column():
-                    status_output = gr.Textbox(
-                        label="Pipeline Status",
-                        lines=5,
-                        interactive=False
-                    )
-            
-            query_btn.click(
-                fn=query_rag,
-                inputs=[question_input],
-                outputs=[answer_output, status_output]
-            )
-        
-        # Tab 3: Collection Info
-        with gr.Tab("📊 Collection Info"):
-            gr.Markdown("""
-            ### View collection statistics
-            Check the current state of your document collection.
-            """)
-            
-            refresh_btn = gr.Button("🔄 Refresh Stats", variant="secondary")
-            stats_output = gr.Textbox(
-                label="Collection Statistics",
-                lines=10,
-                interactive=False
-            )
-            
-            refresh_btn.click(
-                fn=get_collection_info,
-                inputs=[],
-                outputs=[stats_output]
-            )
-    
-    gr.Markdown("""
-    ---
-    ### 💡 Tips
-    - Ingest documents before querying
-    - The pipeline uses gap analysis to iteratively improve retrieval
-    - BM25 reranking and token budget enforcement ensure quality results
-    """)
-
+# ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logger.info("Starting BubbleHead RAG Testing UI...")
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        show_error=True,
-        theme=gr.themes.Soft()
+    logger.info("Starting BubbleHead Research Analysis Interface on http://localhost:7860")
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=7860,
+        log_level="info",
     )

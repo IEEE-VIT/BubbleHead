@@ -1,28 +1,29 @@
-# BubbleHead RAG Requirements
+# BubbleHead runtime dependencies
 # Python 3.11+
 
-# ── Orchestration ─────────────────────────────────────────────────────────
+# Core orchestration
 langchain-core==0.3.10
 langchain-community==0.3.2
 langgraph==0.2.39
 ollama==0.2.1
 
-# ── Vector Store ──────────────────────────────────────────────────────────
+# Vector store
 chromadb==0.5.5
 
-# ── Document Parsing ──────────────────────────────────────────────────────
+# Parsing and ingestion
+beautifulsoup4
+pandas==2.2.2
+pdfplumber
 pymupdf==1.24.10
 python-docx==1.1.2
 python-pptx==0.6.23
+tiktoken
 
-# ── Retrieval ─────────────────────────────────────────────────────────────
+# Retrieval and utilities
+numpy==1.26.4
 rank_bm25
 
-# ── Utilities ─────────────────────────────────────────────────────────────
-numpy==1.26.4
-pandas==2.2.2
-tiktoken
-beautifulsoup4
-
-# ── UI ────────────────────────────────────────────────────────────────────
-gradio
+# API and UI
+fastapi
+python-multipart
+uvicorn[standard]

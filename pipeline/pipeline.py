@@ -28,22 +28,28 @@ class PipelineState(TypedDict):
 def retrieve_node(state: PipelineState) -> PipelineState:
     """
     Retrieval node: retrieves chunks for the query.
-    
+
+    On the first iteration uses the original query. On retries uses the
+    refined query stored in missing_info by gap_analysis_node.
+
     Args:
         state: Current pipeline state
-        
+
     Returns:
         Updated state with retrieved chunks
     """
     logger.info("Retrieve node: processing query")
-    
-    query = state['query']
-    
-    # Call retriever
+
+    # Use the gap-analysis-refined query on retries, otherwise the original.
+    refined = state.get('missing_info', '')
+    query   = refined if (state.get('iteration', 0) > 0 and refined) else state['query']
+
+    logger.info("Retrieving with query (iteration=%d): %.60s...", state.get('iteration', 0), query)
+
     chunks = retrieve(query)
-    
+
     logger.info("Retrieved %d chunks", len(chunks))
-    
+
     return {
         **state,
         'chunks': chunks,
@@ -129,19 +135,30 @@ def generate_node(state: PipelineState) -> PipelineState:
 
 def route_after_gap_analysis(state: PipelineState) -> Literal["END", "retrieve_node"]:
     """
-    Route based on gap analysis status.
-    
-    - 'PASS' → END (answer is good)
-    - 'RETRY' → retrieve_node (get more chunks and regenerate)
+    Route based on gap analysis status and iteration count.
+
+    - 'PASS'                              → END
+    - 'RETRY' + within max iterations     → retrieve_node
+    - 'RETRY' + max iterations exhausted  → END  (FORCE_PASS)
     """
+    from config import GAP_MAX_ITERATIONS
+
     gap_status = state.get('gap_status', '')
-    
+    iteration  = state.get('iteration', 0)
+
     if gap_status == 'PASS':
-        logger.info("Routing to END (gap_status=%s)", gap_status)
+        logger.info("Routing to END — gap analysis PASS")
         return "END"
-    else:
-        logger.info("Routing to retrieve_node for retry (gap_status=%s)", gap_status)
-        return "retrieve_node"
+
+    if iteration >= GAP_MAX_ITERATIONS:
+        logger.warning(
+            "Routing to END — max iterations (%d) reached without PASS (FORCE_PASS)",
+            GAP_MAX_ITERATIONS,
+        )
+        return "END"
+
+    logger.info("Routing to retrieve_node for retry (iteration=%d)", iteration)
+    return "retrieve_node"
 
 
 # ── GRAPH CONSTRUCTION ────────────────────────────────────────────────────
