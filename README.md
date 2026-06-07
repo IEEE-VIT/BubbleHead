@@ -178,7 +178,3 @@ black --check .
 flake8 .
 python -m compileall .
 ```
-
-## License
-
-MIT. See `LICENSE`.
