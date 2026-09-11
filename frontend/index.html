@@ -392,11 +392,34 @@
     /* AI text column */
     .ai-col { flex: 1; min-width: 0; }
 
+    .ai-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 5px;
+    }
+
     .ai-name {
       font-size: .77rem;
       font-weight: 600;
       color: var(--t2);
-      margin-bottom: 5px;
+    }
+
+    .copy-answer-btn {
+      background: var(--light);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--dark-blue);
+      font-size: .68rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      transition: background .14s, border-color .14s;
+      flex-shrink: 0;
+    }
+    .copy-answer-btn:hover {
+      background: #DDEDF7;
+      border-color: #C0D8E6;
     }
 
     /* system pill */
@@ -844,6 +867,18 @@ function showMsgs() {
   document.getElementById('msgs-wrap').style.display = 'block';
 }
 
+async function copyAnswer(btn) {
+  const text = btn.dataset.answer || '';
+  const original = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = 'Copied!';
+  } catch (_) {
+    btn.textContent = 'Copy failed';
+  }
+  setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
 /* ── pipeline readiness polling ─────────────────────────────────────────── */
 async function checkReady() {
   const row = document.getElementById('pipeline-status-row');
@@ -970,10 +1005,15 @@ function _appendAI(text, meta, saveIt) {
   row.innerHTML = `
     <div class="ai-ava">B</div>
     <div class="ai-col">
-      <div class="ai-name">BubbleHead</div>
+      <div class="ai-head">
+        <div class="ai-name">BubbleHead</div>
+        <button class="copy-answer-btn" type="button">Copy</button>
+      </div>
       <div class="prose">${md(text)}</div>
       ${metaHtml}
     </div>`;
+  row.querySelector('.copy-answer-btn').dataset.answer = text;
+  row.querySelector('.copy-answer-btn').addEventListener('click', e => copyAnswer(e.currentTarget));
   msgs.appendChild(row);
   if (saveIt) { const s = sessions.find(x=>x.id===currentId); if(s) pushMsg(s,'ai',text,{meta}); }
   scrollBottom();
