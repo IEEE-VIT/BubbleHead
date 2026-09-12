@@ -1,4 +1,4 @@
-# BubbleHead RAG Pipeline
+# BubbleHead
 
 BubbleHead is a local retrieval-augmented generation (RAG) application built on Ollama, ChromaDB, BM25 reranking, and an iterative gap-analysis loop. The current repo ships a FastAPI backend, a static HTML/JavaScript frontend, and a CLI for batch ingestion and ad hoc queries.
 
@@ -13,11 +13,12 @@ BubbleHead is a local retrieval-augmented generation (RAG) application built on 
 
 ## Architecture
 
-```text
-retrieve_node -> generate_node -> gap_analysis_node
-                                      |
-                                   PASS -> end
-                                   RETRY -> retrieve_node
+```mermaid
+flowchart LR
+    A[retrieve_node] --> B[generate_node]
+    B --> C{gap_analysis_node}
+    C -->|PASS| D[end]
+    C -->|RETRY| A
 ```
 
 ## Requirements
@@ -30,31 +31,44 @@ retrieve_node -> generate_node -> gap_analysis_node
 ## Quick Start
 
 1. Clone the repository and move into it.
+
    ```bash
    git clone <your-repo-url>
    cd BubbleHead
    ```
+
 2. Create and activate a virtual environment.
+
    ```bash
    python -m venv .venv
    ```
+
    Windows:
+
    ```bash
    .venv\Scripts\activate
    ```
+
    macOS/Linux:
+
    ```bash
    source .venv/bin/activate
    ```
+
 3. Install Python dependencies.
+
    ```bash
    pip install -r requirements.txt
    ```
+
 4. Start Ollama and pull the models used by `config.py`.
+
    ```bash
    ollama serve
    ```
+
    In another terminal:
+
    ```bash
    ollama pull nomic-embed-text
    ollama pull mistral:latest
@@ -178,3 +192,7 @@ black --check .
 flake8 .
 python -m compileall .
 ```
+
+## Project Contributor
+
+This project was made by @Karan1114Anand and @Aishani1807
