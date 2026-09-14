@@ -17,9 +17,9 @@ except ImportError:
     CHUNK_SIZE = 512
     CHUNK_OVERLAP = 50
 
-MAX_TOKENS: int = CHUNK_SIZE          # hard upper bound
+MAX_TOKENS: int = CHUNK_SIZE  # hard upper bound
 TARGET_MIN: int = int(MAX_TOKENS * 0.78)  # ~400 tokens
-OVERLAP_TOKENS: int = CHUNK_OVERLAP   # tokens carried over between chunks
+OVERLAP_TOKENS: int = CHUNK_OVERLAP  # tokens carried over between chunks
 
 # ---------------------------------------------------------------------------
 # Logger
@@ -37,6 +37,7 @@ _ENCODER = tiktoken.get_encoding("cl100k_base")
 # Token counting
 # ---------------------------------------------------------------------------
 
+
 def _token_count(text: str) -> int:
     """Return the number of BPE tokens in *text* using tiktoken (cl100k_base)."""
     return len(_ENCODER.encode(text))
@@ -46,10 +47,11 @@ def _token_count(text: str) -> int:
 # Data containers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Chunk:
     text: str
-    type: str = "text"   # "text" | "code" | "table"
+    type: str = "text"  # "text" | "code" | "table"
 
     def to_dict(self) -> dict:
         return {"text": self.text, "type": self.type}
@@ -58,6 +60,7 @@ class Chunk:
 # ---------------------------------------------------------------------------
 # Low-level text splitters
 # ---------------------------------------------------------------------------
+
 
 def _split_into_sentences(text: str) -> List[str]:
     """
@@ -71,7 +74,7 @@ def _split_into_sentences(text: str) -> List[str]:
 
 def _split_into_paragraphs(text: str) -> List[str]:
     """Split by one or more blank lines."""
-    return [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 
 def _sentence_overlap(sentences: List[str], n_tokens: int) -> str:
@@ -94,6 +97,7 @@ def _sentence_overlap(sentences: List[str], n_tokens: int) -> str:
 # Code-block extractor
 # ---------------------------------------------------------------------------
 
+
 def _extract_code_blocks(text: str) -> Tuple[str, List[Tuple[str, str]]]:
     """
     Extract fenced code blocks (``` ... ```) from text.
@@ -102,7 +106,7 @@ def _extract_code_blocks(text: str) -> Tuple[str, List[Tuple[str, str]]]:
       - the original text with each code block replaced by a placeholder string
       - a list of (placeholder, code_block_text) pairs
     """
-    pattern = re.compile(r'(```[\s\S]*?```)', re.MULTILINE)
+    pattern = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
     blocks = pattern.findall(text)
     placeholders: List[Tuple[str, str]] = []
     for i, block in enumerate(blocks):
@@ -116,6 +120,7 @@ def _extract_code_blocks(text: str) -> Tuple[str, List[Tuple[str, str]]]:
 # Table extractor (Markdown tables)
 # ---------------------------------------------------------------------------
 
+
 def _extract_tables(text: str) -> Tuple[str, List[Tuple[str, str]]]:
     """
     Extract Markdown tables from text, replacing them with placeholders.
@@ -128,9 +133,9 @@ def _extract_tables(text: str) -> Tuple[str, List[Tuple[str, str]]]:
     # Each line must contain at least one pipe character; the block must
     # include at least one separator row of the form |---|---|.
     pattern = re.compile(
-        r'((?:[^\n]*\|[^\n]*\n)*'   # zero or more leading pipe lines
-        r'[^\n]*\|[-: |]+\|[^\n]*'  # the separator row (required)
-        r'(?:\n[^\n]*\|[^\n]*)*)',   # zero or more trailing pipe lines
+        r"((?:[^\n]*\|[^\n]*\n)*"  # zero or more leading pipe lines
+        r"[^\n]*\|[-: |]+\|[^\n]*"  # the separator row (required)
+        r"(?:\n[^\n]*\|[^\n]*)*)",  # zero or more trailing pipe lines
         re.MULTILINE,
     )
     tables = pattern.findall(text)
@@ -148,6 +153,7 @@ def _extract_tables(text: str) -> Tuple[str, List[Tuple[str, str]]]:
 # ---------------------------------------------------------------------------
 # Core chunking logic for plain text
 # ---------------------------------------------------------------------------
+
 
 def _chunk_plain_text(text: str, pending_overlap: str = "") -> List[Chunk]:
     """
@@ -206,7 +212,8 @@ def _chunk_plain_text(text: str, pending_overlap: str = "") -> List[Chunk]:
                         chunk_text = " ".join(word_buf)
                         chunks.append(Chunk(text=chunk_text, type="text"))
                         logger.debug(
-                            "Hard word-split chunk (%d tokens)", _token_count(chunk_text)
+                            "Hard word-split chunk (%d tokens)",
+                            _token_count(chunk_text),
                         )
                         overlap_words = word_buf[-OVERLAP_TOKENS:]
                         word_buf = overlap_words + [word]
@@ -241,6 +248,7 @@ def _chunk_plain_text(text: str, pending_overlap: str = "") -> List[Chunk]:
 # Table chunker (keeps rows together; repeats header in continuations)
 # ---------------------------------------------------------------------------
 
+
 def _chunk_table(table_text: str) -> List[Chunk]:
     """
     Chunk a Markdown table.  Never splits a row.
@@ -253,7 +261,7 @@ def _chunk_table(table_text: str) -> List[Chunk]:
     header_lines: List[str] = []
     data_lines: List[str] = []
 
-    if len(lines) >= 2 and re.match(r'\|[-: |]+\|', lines[1]):
+    if len(lines) >= 2 and re.match(r"\|[-: |]+\|", lines[1]):
         header_lines = lines[:2]
         data_lines = lines[2:]
     else:
@@ -273,7 +281,9 @@ def _chunk_table(table_text: str) -> List[Chunk]:
             chunk_text = "\n".join(current_rows).strip()
             if chunk_text:
                 chunks.append(Chunk(text=chunk_text, type="table"))
-                logger.debug("Flushed table chunk (%d tokens)", _token_count(chunk_text))
+                logger.debug(
+                    "Flushed table chunk (%d tokens)", _token_count(chunk_text)
+                )
             current_rows = list(header_lines) + [row]
             current_tokens = header_tokens + row_tokens
         else:
@@ -291,6 +301,7 @@ def _chunk_table(table_text: str) -> List[Chunk]:
 # ---------------------------------------------------------------------------
 # Code block chunker
 # ---------------------------------------------------------------------------
+
 
 def _chunk_code(code_text: str) -> List[Chunk]:
     """
@@ -337,6 +348,7 @@ def _chunk_code(code_text: str) -> List[Chunk]:
 # ---------------------------------------------------------------------------
 # Main public API
 # ---------------------------------------------------------------------------
+
 
 def chunk_document(text: str) -> List[dict]:
     """
@@ -428,6 +440,7 @@ def chunk_document(text: str) -> List[dict]:
 # ---------------------------------------------------------------------------
 # Convenience: chunk from JSON prompt format  (used by the pipeline)
 # ---------------------------------------------------------------------------
+
 
 def chunk_from_prompt(prompt_json: str) -> str:
     """

@@ -27,22 +27,25 @@ import tiktoken
 import threading
 
 from config import (
-    CHROMA_COLLECTION, CHROMA_PATH, EMBED_MODEL, OLLAMA_BASE_URL,
+    CHROMA_COLLECTION,
+    CHROMA_PATH,
+    EMBED_MODEL,
+    OLLAMA_BASE_URL,
 )
 
 # CONTEXT WINDOW CONSTANTS (HARD ENFORCED)
-MAX_CHUNK_TOKENS = 512                    # SPEC: Never exceed
-EXPECTED_EMBED_DIM = 768                  # nomic-embed-text ONLY
-CHROMA_UPSERT_BATCH = 250                 # Memory-optimized
-EMBED_PARALLEL_WORKERS = 4                # Ollama concurrency limit
+MAX_CHUNK_TOKENS = 512  # SPEC: Never exceed
+EXPECTED_EMBED_DIM = 768  # nomic-embed-text ONLY
+CHROMA_UPSERT_BATCH = 250  # Memory-optimized
+EMBED_PARALLEL_WORKERS = 4  # Ollama concurrency limit
 CONTEXT_BUDGET_HEADROOM = 5000 - (6 * MAX_CHUNK_TOKENS)  # Computed dynamically
 
 REQUIRED_METADATA: Set[str] = {
-    'source_file',
-    'chunk_index',
-    'page_number',
-    'section_heading',
-    'document_type',
+    "source_file",
+    "chunk_index",
+    "page_number",
+    "section_heading",
+    "document_type",
 }
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,7 @@ logger = logging.getLogger(__name__)
 # Lazy-initialized tokenizer
 _tokenizer = None
 _tokenizer_lock = threading.Lock()
+
 
 def _get_tokenizer():
     """Lazy init tokenizer on first use to avoid loading tiktoken on every import."""
@@ -60,9 +64,11 @@ def _get_tokenizer():
                 _tokenizer = tiktoken.get_encoding("cl100k_base")
     return _tokenizer
 
+
 # Singleton client with thread-safe initialization
 _chroma_client: chromadb.PersistentClient = None
 _client_lock = threading.Lock()
+
 
 def _init_client() -> chromadb.PersistentClient:
     global _chroma_client
@@ -71,17 +77,18 @@ def _init_client() -> chromadb.PersistentClient:
             if _chroma_client is None:
                 Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
                 _chroma_client = chromadb.PersistentClient(
-                    path=CHROMA_PATH,
-                    settings=Settings(anonymized_telemetry=False)
+                    path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False)
                 )
     return _chroma_client
 
-# TOKEN ESTIMATION 
+
+# TOKEN ESTIMATION
 def _estimate_tokens(text: str) -> int:
-    #Accurate token count using tiktoken (cl100k_base).
+    # Accurate token count using tiktoken (cl100k_base).
     return len(_get_tokenizer().encode(text))
 
-# DEDUPLICATION 
+
+# DEDUPLICATION
 def _content_hash(text: str) -> str:
     """
     Stable 16-char SHA-256 fingerprint for deterministic deduplication.
@@ -92,9 +99,10 @@ def _content_hash(text: str) -> str:
     """
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
+
 # CHUNK VALIDATION (Fix 5 + Fix 6)
 def validate_chunk(chunk: Any, idx: int) -> Tuple[bool, str]:
-   # Full spec validation: token limit + all 5 required metadata fields.
+    # Full spec validation: token limit + all 5 required metadata fields.
     errors = []
 
     # 1. TOKEN LIMIT (CRITICAL for context budget)
@@ -112,29 +120,32 @@ def validate_chunk(chunk: Any, idx: int) -> Tuple[bool, str]:
 
     valid = not errors
     if not valid:
-        logger.warning("Chunk %d REJECTED: %s", idx, '; '.join(errors))
+        logger.warning("Chunk %d REJECTED: %s", idx, "; ".join(errors))
 
-    return valid, '; '.join(errors)
+    return valid, "; ".join(errors)
 
-# EMBEDDING ENGINE 
-def _embed_single(text: str, is_query: bool = False, retry_count: int = 1) -> List[float]:
-    #Single embedding using nomic-embed-text asymmetric prompting with retry.
+
+# EMBEDDING ENGINE
+def _embed_single(
+    text: str, is_query: bool = False, retry_count: int = 1
+) -> List[float]:
+    # Single embedding using nomic-embed-text asymmetric prompting with retry.
     prefix = "search_query: " if is_query else "search_document: "
     full_text = prefix + text
-    
+
     last_error = None
     for attempt in range(retry_count + 1):
         try:
             resp = ollama.embeddings(
-                model=EMBED_MODEL,
-                prompt=full_text,
-                options={"timeout": 20}
+                model=EMBED_MODEL, prompt=full_text, options={"timeout": 20}
             )
             embedding = resp["embedding"]
 
             # DIMENSION CHECK (spec compliance)
             if len(embedding) != EXPECTED_EMBED_DIM:
-                raise ValueError("Dim mismatch: %d != %d" % (len(embedding), EXPECTED_EMBED_DIM))
+                raise ValueError(
+                    "Dim mismatch: %d != %d" % (len(embedding), EXPECTED_EMBED_DIM)
+                )
 
             return embedding
 
@@ -147,16 +158,17 @@ def _embed_single(text: str, is_query: bool = False, retry_count: int = 1) -> Li
 
 
 def embed_chunks_parallel(
-    chunks: List,
-    is_query: bool = False
+    chunks: List, is_query: bool = False
 ) -> List[Tuple[Any, List[float]]]:
     """Parallel embedding with per-future error handling. Returns only successful (chunk, embedding) pairs."""
     logger.info("Parallel embedding %d chunks (is_query=%s)...", len(chunks), is_query)
     start = time.time()
 
     with ThreadPoolExecutor(max_workers=EMBED_PARALLEL_WORKERS) as executor:
-        futures = {executor.submit(_embed_single, c.text, is_query): (i, c)
-                   for i, c in enumerate(chunks)}
+        futures = {
+            executor.submit(_embed_single, c.text, is_query): (i, c)
+            for i, c in enumerate(chunks)
+        }
 
         successful_pairs = []
         failed_count = 0
@@ -174,9 +186,14 @@ def embed_chunks_parallel(
     elapsed = time.time() - start
     logger.info(
         " Embedded %d/%d chunks in %.1fs (%.0f/s), %d failed",
-        success_count, len(chunks), elapsed, success_count / elapsed if elapsed > 0 else 0, failed_count
+        success_count,
+        len(chunks),
+        elapsed,
+        success_count / elapsed if elapsed > 0 else 0,
+        failed_count,
     )
     return successful_pairs
+
 
 # MAIN INGESTION PIPELINE
 def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> dict:
@@ -186,13 +203,17 @@ def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> d
     Returns dict with context budget safety metrics.
     """
     if not chunks:
-        return {"stored": 0, "rejected": 0, "embed_failed": 0,
-                "avg_tokens": 0, "context_safe": True}
+        return {
+            "stored": 0,
+            "rejected": 0,
+            "embed_failed": 0,
+            "avg_tokens": 0,
+            "context_safe": True,
+        }
 
     client = _init_client()
     collection = client.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"}
+        name=collection_name, metadata={"hnsw:space": "cosine"}
     )
 
     # ── PHASE 1: VALIDATION (Context Budget Gatekeeper) ──────────────────
@@ -216,7 +237,11 @@ def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> d
 
     logger.info(
         "VALIDATION: %d/%d valid (%d rejected), avg %.0f tokens/chunk, max %d tokens",
-        len(valid_chunks), len(chunks), rejected, avg_tokens, max_tokens
+        len(valid_chunks),
+        len(chunks),
+        rejected,
+        avg_tokens,
+        max_tokens,
     )
 
     if not context_safe:
@@ -228,7 +253,7 @@ def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> d
     # Unpack successful pairs
     safe_chunks = [chunk for chunk, _ in successful_pairs]
     safe_embeddings = [embedding for _, embedding in successful_pairs]
-    
+
     embed_failed = len(valid_chunks) - len(successful_pairs)
     if embed_failed > 0:
         logger.warning("  %d chunks dropped due to embedding failure", embed_failed)
@@ -238,21 +263,18 @@ def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> d
     ingest_start = time.time()
 
     for i in range(0, len(safe_chunks), CHROMA_UPSERT_BATCH):
-        batch = safe_chunks[i:i + CHROMA_UPSERT_BATCH]
-        batch_embeddings = safe_embeddings[i:i + CHROMA_UPSERT_BATCH]
+        batch = safe_chunks[i : i + CHROMA_UPSERT_BATCH]
+        batch_embeddings = safe_embeddings[i : i + CHROMA_UPSERT_BATCH]
 
         # Old index-based IDs (source_file::chunk_index) broke deduplication
         # whenever chunk indices shifted after document edits.
-        ids = [
-            f"{c.metadata['source_file']}::{_content_hash(c.text)}"
-            for c in batch
-        ]
-        documents = [c.text for c in batch]          # RAW TEXT for clean retrieval
+        ids = [f"{c.metadata['source_file']}::{_content_hash(c.text)}" for c in batch]
+        documents = [c.text for c in batch]  # RAW TEXT for clean retrieval
         metadatas = [c.metadata.copy() for c in batch]
 
         # Annotate each chunk's token count for retriever budget awareness
         for j, meta in enumerate(metadatas):
-            meta['token_count'] = _estimate_tokens(documents[j])
+            meta["token_count"] = _estimate_tokens(documents[j])
 
         collection.upsert(
             ids=ids,
@@ -280,6 +302,8 @@ def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> d
 
     logger.info(" INGEST COMPLETE: %s", json.dumps(stats, indent=2))
     return stats
+
+
 # UTILITIES
 def get_collection(collection_name: str = CHROMA_COLLECTION) -> chromadb.Collection:
     return _init_client().get_collection(name=collection_name)
@@ -291,7 +315,7 @@ def delete_collection(collection_name: str = CHROMA_COLLECTION) -> None:
 
 
 def collection_stats(collection_name: str = CHROMA_COLLECTION) -> dict:
-    #Context-aware collection stats.
+    # Context-aware collection stats.
     try:
         coll = get_collection(collection_name)
         return {
@@ -306,4 +330,6 @@ def collection_stats(collection_name: str = CHROMA_COLLECTION) -> dict:
 
 def init_logging():
     """Initialize logging configuration. Call this at entry point, not at module level."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )

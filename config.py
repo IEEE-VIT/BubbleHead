@@ -46,13 +46,13 @@ GAP_MAX_ITERATIONS : int
 """
 
 # ── VECTOR DATABASE ───────────────────────────────────────────────────────
-CHROMA_PATH = './data/chroma'
-CHROMA_COLLECTION = 'bubblehead'
+CHROMA_PATH = "./data/chroma"
+CHROMA_COLLECTION = "bubblehead"
 
 # ── OLLAMA CONFIGURATION ──────────────────────────────────────────────────
-OLLAMA_BASE_URL = 'http://localhost:11434'
-EMBED_MODEL = 'nomic-embed-text'
-LLM_MODEL = 'mistral:latest'
+OLLAMA_BASE_URL = "http://localhost:11434"
+EMBED_MODEL = "nomic-embed-text"
+LLM_MODEL = "mistral:latest"
 LLM_TEMPERATURE = 0.3
 
 # ── UPLOAD LIMIT ──────────────────────────────────────────────────────────

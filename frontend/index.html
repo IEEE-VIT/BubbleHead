@@ -446,6 +446,21 @@
       border-radius: 20px;
     }
 
+    .copy-answer {
+      margin-top: 10px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--light);
+      color: var(--t2);
+      font: inherit;
+      font-size: .75rem;
+      cursor: pointer;
+    }
+    .copy-answer:hover { color: var(--t1); }
+    .copy-answer:focus-visible { outline: 2px solid var(--mid); outline-offset: 2px; }
+    .copy-answer:disabled { cursor: default; }
+
     /* ── MARKDOWN PROSE ── */
     .prose                    { font-size: .94rem; line-height: 1.72; color: var(--t1); }
     .prose > *:first-child    { margin-top: 0 !important; }
@@ -973,8 +988,24 @@ function _appendAI(text, meta, saveIt) {
     <div class="ai-col">
       <div class="ai-name">BubbleHead</div>
       <div class="prose">${md(text)}</div>
+      <button type="button" class="copy-answer" aria-live="polite">Copy</button>
       ${metaHtml}
     </div>`;
+  const copyButton = row.querySelector('.copy-answer');
+  copyButton.addEventListener('click', async () => {
+    copyButton.disabled = true;
+    try {
+      await navigator.clipboard.writeText(text);
+      copyButton.textContent = 'Copied!';
+    } catch (_) {
+      copyButton.textContent = 'Could not copy';
+    } finally {
+      setTimeout(() => {
+        copyButton.textContent = 'Copy';
+        copyButton.disabled = false;
+      }, 1500);
+    }
+  });
   msgs.appendChild(row);
   if (saveIt) { const s = sessions.find(x=>x.id===currentId); if(s) pushMsg(s,'ai',text,{meta}); }
   scrollBottom();
