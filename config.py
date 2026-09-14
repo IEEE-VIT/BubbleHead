@@ -45,6 +45,9 @@ GAP_MAX_ITERATIONS : int
     Maximum number of retrieval iterations in gap analysis retry loop
 """
 
+# ── UPLOAD LIMITS ──────────────────────────────────────────────────────────
+MAX_UPLOAD_MB = 20
+
 # ── VECTOR DATABASE ───────────────────────────────────────────────────────
 CHROMA_PATH = './data/chroma'
 CHROMA_COLLECTION = 'bubblehead'
