@@ -445,21 +445,6 @@
       padding: 2px 8px;
       border-radius: 20px;
     }
-    .copy-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 8px;
-    font-size: .72rem;
-    color: var(--t2);
-    background: var(--light);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 9px;
-    cursor: pointer;
-    transition: background .15s ease, color .15s ease;
-    }
-    .copy-btn:hover { background: var(--mid); color: #fff; }
 
     /* ── MARKDOWN PROSE ── */
     .prose                    { font-size: .94rem; line-height: 1.72; color: var(--t1); }
@@ -755,7 +740,7 @@
       <div class="input-shell">
 
         <input type="file" id="file-inp"
-               accept=".pdf,.docx,.pptx,.txt,.html,.csv"
+               accept=".pdf,.docx,.pptx,.txt,.html,.csv,.md"
                style="display:none" />
 
         <div class="upload-strip" id="ustrip">
@@ -987,22 +972,9 @@ function _appendAI(text, meta, saveIt) {
     <div class="ai-col">
       <div class="ai-name">BubbleHead</div>
       <div class="prose">${md(text)}</div>
-      <button class="copy-btn" type="button">📋 Copy</button>
       ${metaHtml}
     </div>`;
   msgs.appendChild(row);
-  const copyBtn = row.querySelector('.copy-btn');
-  copyBtn.addEventListener('click', () => {
-  navigator.clipboard.writeText(text)
-    .then(() => {
-      copyBtn.textContent = '✅ Copied!';
-      setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 1500);
-    })
-    .catch(() => {
-      copyBtn.textContent = '⚠️ Failed';
-      setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 1500);
-    });
-});
   if (saveIt) { const s = sessions.find(x=>x.id===currentId); if(s) pushMsg(s,'ai',text,{meta}); }
   scrollBottom();
 }

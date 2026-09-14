@@ -43,6 +43,8 @@ def parse(file_path: str) -> List[Dict]:
         return _parse_pptx(str(path))
     elif suffix == ".txt":
         return _parse_txt(str(path))
+    elif suffix == ".md":
+        return _parse_md(str(path))
     elif suffix in [".html", ".htm"]:
         return _parse_html(str(path))
     elif suffix == ".csv":
@@ -249,6 +251,27 @@ def _parse_txt(file_path: str) -> List[Dict]:
         "page": 0,
         "section_heading": "",
         "doc_type": "txt",
+        "source": source
+    }]
+
+def _parse_md(file_path: str) -> List[Dict]:
+    """
+    Parse Markdown files.
+    """
+    source = str(file_path)
+    
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except UnicodeDecodeError:
+        with open(file_path, "r", encoding="latin-1", errors="replace") as f:
+            text = f.read()
+    
+    return [{
+        "text": text,
+        "page": 0,
+        "section_heading": "",
+        "doc_type": "md",
         "source": source
     }]
 
