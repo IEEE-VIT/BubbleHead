@@ -55,6 +55,10 @@ EMBED_MODEL = 'nomic-embed-text'
 LLM_MODEL = 'mistral:latest'
 LLM_TEMPERATURE = 0.3
 
+# ── UPLOAD LIMIT ──────────────────────────────────────────────────────────
+# Upload sizes use binary megabytes (1024 * 1024 bytes).
+MAX_UPLOAD_MB = 20
+
 # ── CHUNKING PARAMETERS ───────────────────────────────────────────────────
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 50

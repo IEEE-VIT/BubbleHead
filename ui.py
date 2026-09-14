@@ -15,9 +15,11 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from config import MAX_UPLOAD_MB
 
 # ── Lazy pipeline loader ───────────────────────────────────────────────────────
 # Heavy imports (chromadb, pymupdf, langchain, ollama) are deferred to a
@@ -97,6 +99,16 @@ async def status():
     return JSONResponse({"ready": _ready, "error": _load_err})
 
 
+@app.get("/api/config.js", include_in_schema=False)
+async def frontend_config():
+    """Share the upload limit with the browser before it handles file selections."""
+    return Response(
+        f"const MAX_UPLOAD_MB = {MAX_UPLOAD_MB};",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.post("/api/ingest")
 async def ingest(file: UploadFile = File(...)):
     if not _ready:
@@ -116,8 +128,15 @@ async def ingest(file: UploadFile = File(...)):
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
-        content = await file.read()
         with os.fdopen(tmp_fd, "wb") as fh:
+            # One extra byte detects oversized uploads without reading them in full.
+            max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+            content = await file.read(max_bytes + 1)
+            if len(content) > max_bytes:
+                return JSONResponse({
+                    "success": False,
+                    "message": f"File too large (max {MAX_UPLOAD_MB}MB).",
+                }, status_code=413)
             fh.write(content)
 
         file_name = file.filename

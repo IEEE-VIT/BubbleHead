@@ -785,6 +785,7 @@
 <!-- ══════════════════════════════════════════
      JAVASCRIPT
 ══════════════════════════════════════════ -->
+<script src="/api/config.js"></script>
 <script>
 'use strict';
 
@@ -1026,6 +1027,16 @@ async function onFileChosen() {
   if (!fi.files.length) return;
   const file = fi.files[0];
   fi.value   = '';
+
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    const message = `Ingestion failed: File too large (max ${MAX_UPLOAD_MB}MB).`;
+    const session = ensureSession(`[Ingest] ${file.name}`);
+    showMsgs();
+    _appendSys(message, 'err', false);
+    pushMsg(session, 'sys', message, { cls:'err' });
+    renderHistory();
+    return;
+  }
 
   busy = true; toggleSend();
   const strip  = document.getElementById('ustrip');
