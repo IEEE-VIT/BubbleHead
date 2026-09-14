@@ -1,6 +1,6 @@
 """
 Document parser for RAG pipeline.
-Extracts text from PDF, DOCX, PPTX, TXT, HTML, and CSV files into standardized dictionaries.
+Extracts text from PDF, DOCX, PPTX, TXT, MD, HTML, and CSV files into standardized dictionaries.
 """
 
 from pathlib import Path
@@ -43,6 +43,8 @@ def parse(file_path: str) -> List[Dict]:
         return _parse_pptx(str(path))
     elif suffix == ".txt":
         return _parse_txt(str(path))
+    elif suffix == ".md":
+        return _parse_md(str(path))
     elif suffix in [".html", ".htm"]:
         return _parse_html(str(path))
     elif suffix == ".csv":
@@ -263,6 +265,14 @@ def _parse_txt(file_path: str) -> List[Dict]:
             "source": source,
         }
     ]
+
+
+def _parse_md(file_path: str) -> List[Dict]:
+    """Read Markdown as plain text, preserving its original markup."""
+    sections = _parse_txt(file_path)
+    for section in sections:
+        section["doc_type"] = "md"
+    return sections
 
 
 def _parse_html(file_path: str) -> List[Dict]:

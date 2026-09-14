@@ -122,7 +122,7 @@ async def ingest(file: UploadFile = File(...)):
         return JSONResponse({"success": False, "message": "No file provided."})
 
     suffix = Path(file.filename).suffix.lower()
-    allowed = {".pdf", ".docx", ".pptx", ".txt", ".html", ".csv"}
+    allowed = {".pdf", ".docx", ".pptx", ".txt", ".md", ".html", ".csv"}
 
     if suffix not in allowed:
         return JSONResponse(

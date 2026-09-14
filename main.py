@@ -15,7 +15,7 @@ from ingestion.Embedder import embed_and_store
 from ingestion.parsers.Parser import parse
 from pipeline.pipeline import run
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".html", ".csv"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md", ".html", ".csv"}
 
 
 def find_supported_files(data_dir: str) -> List[Path]:
