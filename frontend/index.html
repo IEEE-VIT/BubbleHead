@@ -1114,5 +1114,18 @@ async function doQuery() {
   }
 }
 </script>
+<script>
+  const uploadInput = document.getElementById('upload');
+  const MAX_UPLOAD_MB = 20;
+
+  uploadInput.addEventListener('change', () => {
+    const file = uploadInput.files[0];
+    if (file && file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      alert(`File too large (max ${MAX_UPLOAD_MB}MB).`);
+      uploadInput.value = ''; // clears the file input
+    }
+  });
+</script>
+
 </body>
 </html>

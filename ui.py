@@ -4,6 +4,7 @@ ui.py - BubbleHead Research Analysis Interface
 FastAPI backend that serves the vanilla HTML/CSS/JS frontend
 and exposes REST API endpoints for the RAG pipeline.
 """
+from config import MAX_UPLOAD_MB
 
 import logging
 import os
@@ -117,6 +118,8 @@ async def ingest(file: UploadFile = File(...)):
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
         content = await file.read()
+        if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+            return JSONResponse({"success": False, "message": f"File too large (max {MAX_UPLOAD_MB}MB)."})
         with os.fdopen(tmp_fd, "wb") as fh:
             fh.write(content)
 

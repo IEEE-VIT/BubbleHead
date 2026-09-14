@@ -67,3 +67,5 @@ TOKEN_BUDGET = 5000
 # ── GAP ANALYSIS PARAMETERS ───────────────────────────────────────────────
 GAP_CONFIDENCE_THRESHOLD = 0.6
 GAP_MAX_ITERATIONS = 2
+
+MAX_UPLOAD_MB = 20  # or any limit you prefer
