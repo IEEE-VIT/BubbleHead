@@ -772,7 +772,7 @@
         </div>
 
         <p class="input-note">
-          BubbleHead can make mistakes. &nbsp;Ctrl+Enter to send &nbsp;&middot;&nbsp; 📎 attach files to ingest
+          BubbleHead can make mistakes. &nbsp;Enter to send . Shift+Enter for new line &nbsp;&middot;&nbsp; 📎 attach files to ingest
         </p>
 
       </div>
@@ -803,7 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('q-ta');
   ta.addEventListener('input',   () => { resize(ta); toggleSend(); });
   ta.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doQuery(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doQuery(); }
   });
 
   document.getElementById('file-inp').addEventListener('change', onFileChosen);
