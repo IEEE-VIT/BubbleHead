@@ -1021,11 +1021,23 @@ function openFilePicker() {
   document.getElementById('file-inp').click();
 }
 
+const MAX_UPLOAD_MB = 20; // keep in sync with config.py's MAX_UPLOAD_MB
+
 async function onFileChosen() {
   const fi   = document.getElementById('file-inp');
   if (!fi.files.length) return;
   const file = fi.files[0];
   fi.value   = '';
+
+  const maxBytes = MAX_UPLOAD_MB * 1024 * 1024;
+  if (file.size > maxBytes) {
+    const session = ensureSession(`[Ingest] ${file.name}`);
+    showMsgs();
+    _appendSys(`File too large (max ${MAX_UPLOAD_MB}MB).`, 'err', false);
+    pushMsg(session, 'sys', `File too large (max ${MAX_UPLOAD_MB}MB).`, { cls: 'err' });
+    renderHistory();
+    return;
+  }
 
   busy = true; toggleSend();
   const strip  = document.getElementById('ustrip');

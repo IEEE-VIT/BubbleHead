@@ -15,6 +15,8 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, File, UploadFile
+
+from config import MAX_UPLOAD_MB
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -117,6 +119,15 @@ async def ingest(file: UploadFile = File(...)):
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
         content = await file.read()
+
+        max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+        if len(content) > max_bytes:
+            os.close(tmp_fd)
+            return JSONResponse({
+                "success": False,
+                "message": f"File too large (max {MAX_UPLOAD_MB}MB).",
+                })
+
         with os.fdopen(tmp_fd, "wb") as fh:
             fh.write(content)
 
