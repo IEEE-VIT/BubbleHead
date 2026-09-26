@@ -113,24 +113,19 @@ async def frontend_config():
     )
 
 
-@app.post("/api/ingest")
-async def ingest(file: UploadFile = File(...)):
-    if not _ready:
-        return _WARMING_UP
-
+async def _ingest_one_file(file: UploadFile) -> dict:
     if not file or not file.filename:
-        return JSONResponse({"success": False, "message": "No file provided."})
+        return {"success": False, "message": "No file provided."}
 
     suffix = Path(file.filename).suffix.lower()
     allowed = {".pdf", ".docx", ".pptx", ".txt", ".md", ".html", ".csv"}
 
     if suffix not in allowed:
-        return JSONResponse(
-            {
-                "success": False,
-                "message": f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(allowed))}",
-            }
-        )
+        return {
+            "success": False,
+            "file_name": file.filename,
+            "message": f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(allowed))}",
+        }
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
@@ -139,13 +134,11 @@ async def ingest(file: UploadFile = File(...)):
             max_bytes = MAX_UPLOAD_MB * 1024 * 1024
             content = await file.read(max_bytes + 1)
             if len(content) > max_bytes:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "message": f"File too large (max {MAX_UPLOAD_MB}MB).",
-                    },
-                    status_code=413,
-                )
+                return {
+                    "success": False,
+                    "file_name": file.filename,
+                    "message": f"File too large (max {MAX_UPLOAD_MB}MB).",
+                }
             fh.write(content)
 
         file_name = file.filename
@@ -153,27 +146,27 @@ async def ingest(file: UploadFile = File(...)):
 
         parsed_sections = _parse_file(tmp_path)
         if not parsed_sections:
-            return JSONResponse(
-                {
-                    "success": False,
-                    "message": f"No content could be extracted from '{file_name}'.",
-                }
-            )
+            return {
+                "success": False,
+                "file_name": file_name,
+                "message": f"No content could be extracted from '{file_name}'.",
+            }
 
         combined_text = "\n\n".join(s["text"] for s in parsed_sections if s.get("text"))
         if not combined_text.strip():
-            return JSONResponse(
-                {"success": False, "message": f"No readable text in '{file_name}'."}
-            )
+            return {
+                "success": False,
+                "file_name": file_name,
+                "message": f"No readable text in '{file_name}'.",
+            }
 
         chunks = _chunk_document(combined_text)
         if not chunks:
-            return JSONResponse(
-                {
-                    "success": False,
-                    "message": f"Chunking produced no output for '{file_name}'.",
-                }
-            )
+            return {
+                "success": False,
+                "file_name": file_name,
+                "message": f"Chunking produced no output for '{file_name}'.",
+            }
 
         for i, chunk in enumerate(chunks):
             chunk.setdefault("metadata", {})
@@ -204,24 +197,55 @@ async def ingest(file: UploadFile = File(...)):
             stats.get("rejected", 0),
         )
 
-        return JSONResponse(
-            {
-                "success": True,
-                "file_name": file_name,
-                "stored": stats.get("stored", 0),
-                "rejected": stats.get("rejected", 0),
-                "avg_tokens": round(stats.get("avg_tokens", 0)),
-                "max_tokens": stats.get("max_tokens", 0),
-                "collection_total": stats.get("collection_total", 0),
-            }
-        )
+        return {
+            "success": True,
+            "file_name": file_name,
+            "stored": stats.get("stored", 0),
+            "rejected": stats.get("rejected", 0),
+            "avg_tokens": round(stats.get("avg_tokens", 0)),
+            "max_tokens": stats.get("max_tokens", 0),
+            "collection_total": stats.get("collection_total", 0),
+        }
 
     except Exception as exc:
         logger.exception("Ingestion failed for '%s'", file.filename)
-        return JSONResponse({"success": False, "message": str(exc)}, status_code=500)
+        return {"success": False, "file_name": file.filename, "message": str(exc)}
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+@app.post("/api/ingest")
+async def ingest(
+    files: list[UploadFile] | None = File(default=None),
+    file: UploadFile | None = File(default=None),
+):
+    if not _ready:
+        return _WARMING_UP
+
+    uploads = files or ([file] if file is not None else [])
+    if not uploads:
+        return JSONResponse({"success": False, "message": "No file provided."})
+
+    results = [await _ingest_one_file(upload) for upload in uploads]
+    if len(results) == 1:
+        status_code = 413 if "too large" in results[0].get("message", "").lower() else 200
+        return JSONResponse(results[0], status_code=status_code)
+
+    succeeded = [result for result in results if result.get("success")]
+    failed = [result for result in results if not result.get("success")]
+    status_code = 207 if failed and succeeded else (400 if failed else 200)
+    return JSONResponse(
+        {
+            "success": not failed,
+            "files": results,
+            "stored": sum(result.get("stored", 0) for result in succeeded),
+            "rejected": sum(result.get("rejected", 0) for result in succeeded),
+            "processed": len(succeeded),
+            "failed": len(failed),
+        },
+        status_code=status_code,
+    )
 
 
 class QueryRequest(BaseModel):
