@@ -756,6 +756,7 @@
 
         <input type="file" id="file-inp"
                accept=".pdf,.docx,.pptx,.txt,.md,.html,.csv"
+               multiple
                style="display:none" />
 
         <div class="upload-strip" id="ustrip">
@@ -1056,12 +1057,13 @@ function openFilePicker() {
 async function onFileChosen() {
   const fi   = document.getElementById('file-inp');
   if (!fi.files.length) return;
-  const file = fi.files[0];
+  const files = Array.from(fi.files);
   fi.value   = '';
 
-  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-    const message = `Ingestion failed: File too large (max ${MAX_UPLOAD_MB}MB).`;
-    const session = ensureSession(`[Ingest] ${file.name}`);
+  const tooLarge = files.find(file => file.size > MAX_UPLOAD_MB * 1024 * 1024);
+  if (tooLarge) {
+    const message = `Ingestion failed: "${tooLarge.name}" is too large (max ${MAX_UPLOAD_MB}MB).`;
+    const session = ensureSession(`[Ingest] ${tooLarge.name}`);
     showMsgs();
     _appendSys(message, 'err', false);
     pushMsg(session, 'sys', message, { cls:'err' });
@@ -1072,15 +1074,22 @@ async function onFileChosen() {
   busy = true; toggleSend();
   const strip  = document.getElementById('ustrip');
   const sText  = document.getElementById('ustrip-text');
-  sText.textContent = `Ingesting "${file.name}"…`;
+  sText.textContent = files.length === 1
+    ? `Ingesting "${files[0].name}"…`
+    : `Ingesting ${files.length} files…`;
   strip.classList.add('show');
 
-  const session = ensureSession(`[Ingest] ${file.name}`);
+  const sessionTitle = files.length === 1 ? `[Ingest] ${files[0].name}` : `[Ingest] ${files.length} files`;
+  const session = ensureSession(sessionTitle);
   showMsgs();
-  _appendSys(`Ingesting "${file.name}"…`, '', false);
+  _appendSys(
+    files.length === 1 ? `Ingesting "${files[0].name}"…` : `Ingesting ${files.length} files…`,
+    '',
+    false
+  );
 
   const form = new FormData();
-  form.append('file', file);
+  files.forEach(file => form.append('files', file));
 
   try {
     const data = await fetch('/api/ingest', { method:'POST', body:form }).then(r=>r.json());
@@ -1089,18 +1098,30 @@ async function onFileChosen() {
     const msgs = document.getElementById('msgs');
     if (msgs.lastChild) msgs.removeChild(msgs.lastChild);
 
-    if (data.success) {
-      _appendSys(`✓  "${data.file_name}" — ${data.stored} chunks stored`, 'ok', false);
-      pushMsg(session, 'sys', `✓ "${data.file_name}" — ${data.stored} chunks stored`, { cls:'ok' });
-      if (!docs.includes(data.file_name)) {
-        docs.push(data.file_name);
-        localStorage.setItem('bh_docs', JSON.stringify(docs));
-        renderDocs();
+    const results = data.files || [data];
+    let changedDocs = false;
+
+    results.forEach(result => {
+      if (result.success) {
+        _appendSys(`✓  "${result.file_name}" — ${result.stored} chunks stored`, 'ok', false);
+        pushMsg(session, 'sys', `✓ "${result.file_name}" — ${result.stored} chunks stored`, { cls:'ok' });
+        if (!docs.includes(result.file_name)) {
+          docs.push(result.file_name);
+          changedDocs = true;
+        }
+      } else {
+        const name = result.file_name ? `"${result.file_name}" — ` : '';
+        _appendSys(`Ingestion failed: ${name}${result.message}`, 'err', false);
+        pushMsg(session, 'sys', `Ingestion failed: ${name}${result.message}`, { cls:'err' });
       }
+    });
+
+    if (changedDocs) {
+      localStorage.setItem('bh_docs', JSON.stringify(docs));
+      renderDocs();
+    }
+    if (results.some(result => result.success)) {
       pollCollection();
-    } else {
-      _appendSys(`Ingestion failed: ${data.message}`, 'err', false);
-      pushMsg(session, 'sys', `Ingestion failed: ${data.message}`, { cls:'err' });
     }
   } catch (e) {
     const msgs = document.getElementById('msgs');
