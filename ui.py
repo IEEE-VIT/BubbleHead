@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -114,7 +114,10 @@ async def frontend_config():
 
 
 @app.post("/api/ingest")
-async def ingest(file: UploadFile = File(...)):
+async def ingest(
+    file: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+):
     if not _ready:
         return _WARMING_UP
 
@@ -175,6 +178,8 @@ async def ingest(file: UploadFile = File(...)):
                 }
             )
 
+        scoped_session_id = session_id.strip() if session_id else None
+
         for i, chunk in enumerate(chunks):
             chunk.setdefault("metadata", {})
             chunk["metadata"].update(
@@ -186,6 +191,8 @@ async def ingest(file: UploadFile = File(...)):
                     "document_type": suffix.lstrip("."),
                 }
             )
+            if scoped_session_id:
+                chunk["metadata"]["session_id"] = scoped_session_id
 
         @dataclass
         class ChunkObj:
@@ -226,6 +233,7 @@ async def ingest(file: UploadFile = File(...)):
 
 class QueryRequest(BaseModel):
     question: str
+    session_id: str | None = None
 
 
 @app.post("/api/query")
@@ -237,9 +245,10 @@ async def query(req: QueryRequest):
     if not question:
         return JSONResponse({"success": False, "message": "Question cannot be empty."})
 
+    session_id = (req.session_id or "").strip() or None
     try:
         logger.info("Running query: %s", question)
-        answer = _run(question)
+        answer = _run(question, session_id=session_id)
         stats = _collection_stats()
         count = stats.get("count", 0)
 

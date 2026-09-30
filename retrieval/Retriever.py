@@ -6,7 +6,7 @@ Reranks using BM25 and applies token budget constraints.
 """
 
 import logging
-from typing import List, Dict
+from typing import Dict, List
 import chromadb
 from chromadb.config import Settings
 import ollama
@@ -56,7 +56,11 @@ def _embed_query(query: str) -> List[float]:
         raise
 
 
-def retrieve(query: str, top_k: int = TOP_K_CANDIDATES) -> List[Dict]:
+def retrieve(
+    query: str,
+    top_k: int = TOP_K_CANDIDATES,
+    session_id: str | None = None,
+) -> List[Dict]:
     """
     Retrieve top-k most similar chunks for a query with BM25 reranking and token budget.
 
@@ -69,6 +73,7 @@ def retrieve(query: str, top_k: int = TOP_K_CANDIDATES) -> List[Dict]:
     Args:
         query: Plain-text query string
         top_k: Number of initial candidates to retrieve (default: TOP_K_CANDIDATES from config)
+        session_id: Optional UI session id used to restrict ChromaDB candidates
 
     Returns:
         List of dicts with keys: 'text', 'metadata', 'distance', 'bm25_score'
@@ -92,10 +97,14 @@ def retrieve(query: str, top_k: int = TOP_K_CANDIDATES) -> List[Dict]:
     query_embedding = _embed_query(query)
 
     # Query ChromaDB with cosine similarity
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k,
-    )
+    query_kwargs = {
+        "query_embeddings": [query_embedding],
+        "n_results": top_k,
+    }
+    if session_id:
+        query_kwargs["where"] = {"session_id": session_id}
+
+    results = collection.query(**query_kwargs)
 
     # Format initial candidates
     candidates = []

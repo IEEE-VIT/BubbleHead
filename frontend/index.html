@@ -806,7 +806,6 @@
 
 /* ── state ─────────────────────────────────────────────────────────────── */
 let sessions   = JSON.parse(localStorage.getItem('bh_sessions') || '[]');
-let docs       = JSON.parse(localStorage.getItem('bh_docs')     || '[]');
 let currentId  = null;
 let busy       = false;   // query or ingest in progress
 
@@ -906,8 +905,10 @@ function renderHistory() {
 
 function renderDocs() {
   const el = document.getElementById('sb-docs');
-  if (!docs.length) { el.innerHTML = '<div class="sb-empty">No documents ingested</div>'; return; }
-  el.innerHTML = docs.map(d => `
+  const session = currentId ? sessions.find(x => x.id === currentId) : null;
+  const sessionDocs = session?.docs || [];
+  if (!sessionDocs.length) { el.innerHTML = '<div class="sb-empty">No documents in this session</div>'; return; }
+  el.innerHTML = sessionDocs.map(d => `
     <div class="sb-row">
       <svg class="sb-row-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -930,6 +931,7 @@ function newSession() {
   resize(document.getElementById('q-ta'));
   toggleSend();
   renderHistory();
+  renderDocs();
 }
 
 function loadSession(id) {
@@ -947,13 +949,14 @@ function loadSession(id) {
   showMsgs();
   scrollBottom();
   renderHistory();
+  renderDocs();
 }
 
 function ensureSession(firstText) {
   if (currentId) return sessions.find(x => x.id === currentId);
   currentId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
   const title = firstText.length > 42 ? firstText.slice(0,42).trimEnd() + '…' : firstText;
-  const s = { id: currentId, title, messages: [] };
+  const s = { id: currentId, title, messages: [], docs: [] };
   sessions.push(s);
   document.getElementById('topbar-title').textContent = title;
   return s;
@@ -1081,6 +1084,7 @@ async function onFileChosen() {
 
   const form = new FormData();
   form.append('file', file);
+  form.append('session_id', session.id);
 
   try {
     const data = await fetch('/api/ingest', { method:'POST', body:form }).then(r=>r.json());
@@ -1092,9 +1096,10 @@ async function onFileChosen() {
     if (data.success) {
       _appendSys(`✓  "${data.file_name}" — ${data.stored} chunks stored`, 'ok', false);
       pushMsg(session, 'sys', `✓ "${data.file_name}" — ${data.stored} chunks stored`, { cls:'ok' });
-      if (!docs.includes(data.file_name)) {
-        docs.push(data.file_name);
-        localStorage.setItem('bh_docs', JSON.stringify(docs));
+      session.docs ||= [];
+      if (!session.docs.includes(data.file_name)) {
+        session.docs.push(data.file_name);
+        save();
         renderDocs();
       }
       pollCollection();
@@ -1130,7 +1135,7 @@ async function doQuery() {
     const data = await fetch('/api/query', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ question: q }),
+      body:    JSON.stringify({ question: q, session_id: session.id }),
     }).then(r => r.json());
 
     _removeTyping();
