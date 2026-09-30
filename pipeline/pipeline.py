@@ -19,6 +19,7 @@ class PipelineState(TypedDict):
     """State for the RAG pipeline graph."""
 
     query: str  # User's original query
+    session_id: Optional[str]  # Optional UI session scope for retrieval
     chunks: List[Dict]  # Accumulated retrieved chunks
     gap_status: str  # 'PASS' or 'FORCE_PASS'
     missing_info: str  # Missing information note (for FORCE_PASS)
@@ -51,7 +52,7 @@ def retrieve_node(state: PipelineState) -> PipelineState:
         query,
     )
 
-    chunks = retrieve(query)
+    chunks = retrieve(query, session_id=state.get("session_id"))
 
     logger.info("Retrieved %d chunks", len(chunks))
 
@@ -198,12 +199,13 @@ logger.info("RAG pipeline graph compiled successfully")
 # ── PUBLIC API ────────────────────────────────────────────────────────────
 
 
-def run(query: str) -> str:
+def run(query: str, session_id: Optional[str] = None) -> str:
     """
     Run the RAG pipeline for a given query.
 
     Args:
         query: User's question
+        session_id: Optional UI session id to scope retrieval results
 
     Returns:
         Generated answer string
@@ -213,6 +215,7 @@ def run(query: str) -> str:
     # Initialize state
     initial_state: PipelineState = {
         "query": query,
+        "session_id": session_id,
         "chunks": [],
         "gap_status": "",
         "missing_info": "",

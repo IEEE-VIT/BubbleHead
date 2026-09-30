@@ -268,7 +268,18 @@ def embed_and_store(chunks: List, collection_name: str = CHROMA_COLLECTION) -> d
 
         # Old index-based IDs (source_file::chunk_index) broke deduplication
         # whenever chunk indices shifted after document edits.
-        ids = [f"{c.metadata['source_file']}::{_content_hash(c.text)}" for c in batch]
+        ids = [
+            "::".join(
+                part
+                for part in (
+                    c.metadata.get("session_id"),
+                    c.metadata["source_file"],
+                    _content_hash(c.text),
+                )
+                if part
+            )
+            for c in batch
+        ]
         documents = [c.text for c in batch]  # RAW TEXT for clean retrieval
         metadatas = [c.metadata.copy() for c in batch]
 
