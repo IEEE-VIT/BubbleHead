@@ -170,6 +170,27 @@
 
     .sb-row-icon { width: 15px; height: 15px; flex-shrink: 0; opacity: .65; }
     .sb-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .sb-row-delete {
+      width: 24px;
+      height: 24px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--sb-fg-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity .13s, background .13s, color .13s;
+    }
+    .sb-row:hover .sb-row-delete,
+    .sb-row-delete:focus-visible {
+      opacity: 1;
+    }
+    .sb-row-delete:hover {
+      background: rgba(255,255,255,.09);
+      color: #ffb4b4;
+    }
 
     .sb-empty {
       font-size: .77rem;
@@ -901,6 +922,12 @@ function renderHistory() {
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
       </svg>
       <span class="sb-row-text">${esc(s.title)}</span>
+      <button class="sb-row-delete" data-session-id="${esc(s.id)}" onclick="deleteSession(event, this.dataset.sessionId)" title="Delete session" aria-label="Delete ${esc(s.title)}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+        </svg>
+      </button>
     </div>`).join('');
 }
 
@@ -947,6 +974,26 @@ function loadSession(id) {
   showMsgs();
   scrollBottom();
   renderHistory();
+}
+
+async function deleteSession(event, id) {
+  event.stopPropagation();
+  const session = sessions.find(x => x.id === id);
+  if (!session) return;
+  if (!confirm(`Delete "${session.title}"?`)) return;
+
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch (_) {}
+
+  sessions = sessions.filter(x => x.id !== id);
+  save();
+
+  if (currentId === id) {
+    newSession();
+  } else {
+    renderHistory();
+  }
 }
 
 function ensureSession(firstText) {

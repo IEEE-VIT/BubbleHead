@@ -289,6 +289,37 @@ async def get_collection():
         return JSONResponse({"success": False, "message": str(exc)}, status_code=500)
 
 
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Best-effort cleanup for session-scoped backend data.
+
+    The browser owns chat history in localStorage. If ingested chunks include
+    session_id metadata, remove those vectors too; older chunks without that
+    metadata are left untouched.
+    """
+    if not session_id.strip():
+        return JSONResponse({"success": False, "message": "Session id cannot be empty."})
+
+    if not _ready:
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "Session removed locally; backend pipeline is still warming up.",
+            }
+        )
+
+    try:
+        from config import CHROMA_COLLECTION
+        from ingestion.Embedder import _init_client
+
+        collection = _init_client().get_collection(name=CHROMA_COLLECTION)
+        collection.delete(where={"session_id": session_id})
+    except Exception as exc:
+        logger.warning("Session backend cleanup skipped for '%s': %s", session_id, exc)
+
+    return JSONResponse({"success": True, "session_id": session_id})
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
